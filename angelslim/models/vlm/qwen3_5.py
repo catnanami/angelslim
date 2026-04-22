@@ -22,10 +22,17 @@ from safetensors.torch import load_file
 from safetensors.torch import save_file as safe_save
 from tqdm import tqdm
 from transformers import AutoModelForImageTextToText, AutoProcessor, AutoTokenizer
-from transformers.models.qwen3_5_moe.modeling_qwen3_5_moe import (
-    Qwen3_5MoeExperts,
-    Qwen3_5MoeTopKRouter,
-)
+try:
+    from transformers.models.qwen3_5_moe.modeling_qwen3_5_moe import (
+        Qwen3_5MoeExperts,
+        Qwen3_5MoeTopKRouter,
+    )
+except:
+    import torch.nn as _nn
+    class Qwen3_5MoeExperts(_nn.Module):
+        def __init__(self, *args, **kwargs):
+            super().__init__()
+    Qwen3_5MoeTopKRouter = None
 
 from ...compressor.quant.core import LossFilter, PTQVLMSaveVllmHF
 from ...utils import print_info

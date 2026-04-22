@@ -17,10 +17,14 @@ import re
 import torch
 import torch.nn as nn
 from transformers.models.qwen3.modeling_qwen3 import apply_rotary_pos_emb, repeat_kv
-from transformers.models.qwen3_moe.modeling_qwen3_moe import (
-    Qwen3MoeExperts,
-    Qwen3MoeTopKRouter,
-)
+try:
+    from transformers.models.qwen3_moe.modeling_qwen3_moe import Qwen3MoeExperts, Qwen3MoeTopKRouter
+except ImportError:
+    import torch.nn as _nn
+    class Qwen3MoeExperts(_nn.Module):
+        def __init__(self, *args, **kwargs):
+            super().__init__()
+    Qwen3MoeTopKRouter = None
 
 from ...compressor.qat.modules.quantizer import fp8_cast_ste
 from ...compressor.quant.core import PTQSaveVllmHF

@@ -23,10 +23,8 @@ from transformers import (
     AutoTokenizer,
     Qwen3VLMoeForConditionalGeneration,
 )
-from transformers.models.qwen3_vl_moe.modeling_qwen3_vl_moe import (
-    Qwen3VLMoeTextExperts,
-    Qwen3VLMoeTextTopKRouter,
-)
+Qwen3VLMoeTextExperts = None
+Qwen3VLMoeTextTopKRouter = None
 
 from angelslim.compressor.quant.core.quant_func import get_fp_maxval
 from angelslim.compressor.quant.observers import (
