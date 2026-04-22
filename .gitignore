@@ -20,3 +20,4 @@ wandb/
 tools/results/
 __pycache__/outputs/
 __pycache__/.github/workflows/
+.github/workflows/
