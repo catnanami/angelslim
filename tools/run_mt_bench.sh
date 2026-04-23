@@ -1,18 +1,16 @@
 #!/usr/bin/env bash
-# Run Eagle-3 HF-backend speculative-decoding benchmark on LiveCodeBench only.
+# Run Eagle-3 HF-backend speculative-decoding benchmark on MT-Bench only.
 #
 # Usage:
-#   tools/run_livecodebench.sh \
+#   tools/run_mt_bench.sh \
 #       <base_model_path> <eagle_model_path> <model_id> \
 #       [num_samples] [mode] [output_dir]
 #
-# Defaults: num_samples=128, mode=both, output_dir=benchmark_results/livecodebench
+# Defaults: num_samples=128, mode=both, output_dir=benchmark_results/mt_bench
 #
-# This script:
-#   1. Ensures dataset/livecodebench/question.jsonl exists (runs the preparer
-#      if missing).
-#   2. Calls tools/spec_benchmark.py with temperature=0, max_new_token=4096,
-#      deploy_backend=pytorch.
+# MT-Bench ships with 80 two-turn questions. The --question-end cap is still
+# passed through so that this matches the behaviour of run_livecodebench.sh,
+# but the run will naturally stop at the 80 samples available.
 
 set -euo pipefail
 
@@ -28,12 +26,12 @@ NUM_SAMPLES=${4:-128}
 MODE=${5:-both}
 
 REPO_ROOT=$(cd "$(dirname "$0")/.." && pwd)
-OUTPUT_DIR=${6:-"${REPO_ROOT}/benchmark_results/livecodebench"}
-QUESTION_FILE="${REPO_ROOT}/dataset/livecodebench/question.jsonl"
+OUTPUT_DIR=${6:-"${REPO_ROOT}/benchmark_results/mt_bench"}
+QUESTION_FILE="${REPO_ROOT}/dataset/mt_bench/question.jsonl"
 
 if [[ ! -f "${QUESTION_FILE}" ]]; then
-    echo "[prepare] ${QUESTION_FILE} missing — running preparer"
-    python "${REPO_ROOT}/tools/prepare_datasets/livecodebench.py" --num-samples "${NUM_SAMPLES}"
+    echo "error: ${QUESTION_FILE} is missing (mt_bench ships bundled — cannot prepare)" >&2
+    exit 1
 fi
 
 mkdir -p "${OUTPUT_DIR}"
@@ -43,7 +41,7 @@ exec python "${REPO_ROOT}/tools/spec_benchmark.py" \
     --eagle-model-path "${EAGLE_MODEL_PATH}" \
     --model-id "${MODEL_ID}" \
     --deploy-backend pytorch \
-    --bench-name livecodebench \
+    --bench-name mt_bench \
     --mode "${MODE}" \
     --temperature 0 \
     --max-new-token 4096 \
