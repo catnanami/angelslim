@@ -128,6 +128,7 @@ def process_conversation_turn(
     conv: List[Dict[str, str]],
     qs: str,
     temperature: float,
+    max_new_token: int = 512,
 ) -> Dict[str, Any]:
     """Process a single conversation turn"""
     conv.append({"role": "user", "content": qs})
@@ -136,14 +137,24 @@ def process_conversation_turn(
     )
 
     input_ids = tokenizer(
-        conversation, return_tensors="pt", max_length=2048, add_special_tokens=False
+        conversation, return_tensors="pt", add_special_tokens=False
     ).input_ids
+
+    # KV cache in eagle_generate is pre-allocated to `max_length`; 2048 is the
+    # upstream default and is too small for long prompts (LiveCodeBench runs
+    # ~2k tokens). Size it to fit the prompt plus the full generation budget,
+    # with margin for the draft tree (default total_tokens=60) and eos guards.
+    max_length = int(input_ids.shape[1]) + int(max_new_token) + 128
 
     torch.cuda.synchronize()
     start_time = time.time()
 
     output_ids, new_token, idx, accept_length_list = model.eagle_generate(
-        torch.as_tensor(input_ids).cuda(), temperature=temperature, log=True
+        torch.as_tensor(input_ids).cuda(),
+        temperature=temperature,
+        max_new_tokens=max_new_token,
+        max_length=max_length,
+        log=True,
     )
 
     torch.cuda.synchronize()
@@ -267,6 +278,7 @@ def generate_answer_for_question(
     question: Dict[str, Any],
     num_choices: int,
     temperature: float,
+    max_new_token: int = 512,
 ) -> List[Dict[str, Any]]:
     """Generate answers for a single question with multiple choices"""
     choices = []
@@ -280,7 +292,9 @@ def generate_answer_for_question(
         accept_length_lists = []
 
         for qs in question["turns"]:
-            result = process_conversation_turn(model, tokenizer, conv, qs, temperature)
+            result = process_conversation_turn(
+                model, tokenizer, conv, qs, temperature, max_new_token
+            )
             turns.append(result["output"])
             idxs.append(result["idx"])
             new_tokens.append(result["new_token"])
@@ -342,14 +356,20 @@ def generate_answer_for_question_tts(
 
 
 def warmup_model(
-    model: Eagle3Model, tokenizer: Any, question: Dict[str, Any], temperature: float
+    model: Eagle3Model,
+    tokenizer: Any,
+    question: Dict[str, Any],
+    temperature: float,
+    max_new_token: int = 512,
 ) -> None:
     """Warm up the model before actual evaluation"""
     for _ in range(3):
         torch.manual_seed(0)
         conv = [SYSTEM_PROMPT]
         for qs in question["turns"]:
-            process_conversation_turn(model, tokenizer, conv, qs, temperature)
+            process_conversation_turn(
+                model, tokenizer, conv, qs, temperature, max_new_token
+            )
     print("Warmup done")
 
 
@@ -383,13 +403,13 @@ def get_model_answers(
     tokenizer = model.get_tokenizer()
 
     if questions:
-        warmup_model(model, tokenizer, questions[0], temperature)
+        warmup_model(model, tokenizer, questions[0], temperature, args.max_new_token)
 
     os.makedirs(os.path.dirname(answer_file), exist_ok=True)
 
     for question in tqdm(questions):
         choices = generate_answer_for_question(
-            model, tokenizer, question, num_choices, temperature
+            model, tokenizer, question, num_choices, temperature, args.max_new_token
         )
 
         with open(os.path.expanduser(answer_file), "a") as fout:
