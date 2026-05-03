@@ -233,6 +233,12 @@ class BenchmarkEngine:
         # Calculate acceptance length from Eagle results
         if os.path.exists(self.eagle_file):
             metrics["acceptance_length"] = self._calculate_acceptance_length(self.eagle_file)
+            metrics["eagle_avg_wall_time_ms"] = self._calculate_avg_wall_time_ms(self.eagle_file)
+
+        if os.path.exists(self.baseline_file):
+            metrics["baseline_avg_wall_time_ms"] = self._calculate_avg_wall_time_ms(
+                self.baseline_file
+            )
 
         # Calculate speedup ratio if both files exist
         if os.path.exists(self.eagle_file) and os.path.exists(self.baseline_file):
@@ -241,6 +247,21 @@ class BenchmarkEngine:
             )
 
         return metrics
+
+    def _calculate_avg_wall_time_ms(self, input_file: str) -> float:
+        """
+        Calculate mean per-sample wall time in milliseconds.
+
+        For each sample, wall time is defined as the sum of per-turn wall_time.
+        """
+        total = 0.0
+        count = 0
+        with open(input_file, "r", encoding="utf-8") as f:
+            for line in f:
+                data = json.loads(line)
+                total += float(sum(data["choices"][0]["wall_time"]))
+                count += 1
+        return (total / count) * 1000.0 if count > 0 else 0.0
 
     def _calculate_acceptance_length(self, input_file: str) -> float:
         """
@@ -384,6 +405,14 @@ class BenchmarkEngine:
 
         if "speedup_ratio" in self.results:
             summary.append(f"Speedup Ratio: {self.results['speedup_ratio']:.2f}x")
+        if "eagle_avg_wall_time_ms" in self.results:
+            summary.append(
+                f"Eagle Avg Wall Time: {self.results['eagle_avg_wall_time_ms']:.2f} ms"
+            )
+        if "baseline_avg_wall_time_ms" in self.results:
+            summary.append(
+                f"Baseline Avg Wall Time: {self.results['baseline_avg_wall_time_ms']:.2f} ms"
+            )
 
         if "eagle_file" in self.results:
             summary.append(f"Eagle Results: {self.results['eagle_file']}")
