@@ -13,7 +13,8 @@
 # limitations under the License.
 
 from .modeling_cosyvoice3_kv import CosyVoice3
+from .modeling_gpt_oss_kv import GptOssForCausalLM
 from .modeling_llama_kv import LlamaForCausalLM
 from .modeling_qwen3_kv import Qwen3ForCausalLM
 
-__all__ = ["LlamaForCausalLM", "Qwen3ForCausalLM", "CosyVoice3"]
+__all__ = ["LlamaForCausalLM", "Qwen3ForCausalLM", "GptOssForCausalLM", "CosyVoice3"]

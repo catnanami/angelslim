@@ -38,6 +38,7 @@ from ....utils import (
 from .configuration_eagle3_model import Eagle3Config
 from .draft import CosyVoice3Llama3Eagle3Drafter, Llama3Eagle3Drafter
 from .target import CosyVoice3 as KVCosyVoice3
+from .target import GptOssForCausalLM as KVGptOssForCausalLM
 from .target import LlamaForCausalLM as KVLlamaForCausalLM
 from .target import Qwen3ForCausalLM as KVQwen3ForCausalLM
 
@@ -73,6 +74,7 @@ class ModelLoader:
     SUPPORTED_ARCHITECTURES = {
         "LlamaForCausalLM": KVLlamaForCausalLM,
         "Qwen3ForCausalLM": KVQwen3ForCausalLM,
+        "GptOssForCausalLM": KVGptOssForCausalLM,
         "CosyVoice3": KVCosyVoice3,
     }
 
@@ -379,10 +381,19 @@ class Eagle3Model(nn.Module):
         # Load configuration
         config_path = ModelLoader.ensure_config_path(eagle_model_path)
         config = Eagle3Config.from_pretrained(config_path)
+        eagle_aux_layer_ids = None
+        if hasattr(config, "eagle_config") and isinstance(config.eagle_config, dict):
+            eagle_aux_layer_ids = config.eagle_config.get("eagle_aux_hidden_state_layer_ids", None)
 
         # Initialize EAGLE layer
         device = next(base_model.parameters()).device
         eagle_state_dict = ModelLoader.load_eagle_state_dict(eagle_model_path, device)
+
+        if (
+            eagle_aux_layer_ids is not None
+            and hasattr(base_model, "set_eagle_aux_hidden_state_layer_ids")
+        ):
+            base_model.set_eagle_aux_hidden_state_layer_ids(eagle_aux_layer_ids)
 
         # TODO: Implement factory pattern for different drafter types
         eagle_layer = Llama3Eagle3Drafter(
