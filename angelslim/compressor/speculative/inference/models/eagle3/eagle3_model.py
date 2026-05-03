@@ -222,7 +222,7 @@ class GenerationManager:
         if new_token > config.max_new_tokens:
             return True
 
-        if input_ids.shape[1] > config.max_length:
+        if input_ids.shape[1] >= config.max_length:
             return True
 
         return False
