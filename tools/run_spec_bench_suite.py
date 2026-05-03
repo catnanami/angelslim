@@ -5,8 +5,9 @@ mt-bench, and alpaca.
 
 Per-dataset sample cap is 128; datasets with fewer available questions
 (``aime25`` has 30, ``mt_bench`` and the bundled ``gsm8k`` / ``humaneval`` /
-``alpaca`` have 80) run whatever exists. Generation parameters are fixed at
-``temperature=0``, ``max_new_token=4096``, ``deploy_backend=pytorch``.
+``alpaca`` have 80) run whatever exists. ``--temperature`` is required and may list
+multiple values; each is benchmarked against every selected dataset.
+``max_new_token=4096`` and ``deploy_backend=pytorch`` are fixed.
 
 For datasets without a bundled ``dataset/<name>/question.jsonl``, this
 script launches the matching preparer under ``tools/prepare_datasets/`` to
@@ -17,7 +18,8 @@ Example::
     python tools/run_spec_bench_suite.py \\
         --base-model-path /path/to/Qwen3-8B \\
         --eagle-model-path /path/to/eagle3-qwen3-8b \\
-        --model-id qwen3-8b-eagle3
+        --model-id qwen3-8b-eagle3 \\
+        --temperature 0 0.7
 """
 
 import argparse
@@ -94,8 +96,9 @@ def ensure_dataset(name: str, num_samples: int) -> Path:
     return qfile
 
 
-def run_one(name: str, args: argparse.Namespace) -> int:
-    out_dir = Path(args.output_root) / name
+def run_one(name: str, temperature: float, args: argparse.Namespace) -> int:
+    temp_tag = str(temperature).replace(".", "p")
+    out_dir = Path(args.output_root) / name / f"t_{temp_tag}"
     out_dir.mkdir(parents=True, exist_ok=True)
     cmd = [
         sys.executable,
@@ -106,7 +109,7 @@ def run_one(name: str, args: argparse.Namespace) -> int:
         "--deploy-backend", "pytorch",
         "--bench-name", name,
         "--mode", args.mode,
-        "--temperature", "0",
+        "--temperature", str(temperature),
         "--max-new-token", "4096",
         "--question-end", str(args.num_samples),
         "--output-dir", str(out_dir),
@@ -130,6 +133,14 @@ def main():
     p.add_argument("--datasets", nargs="+", default=DEFAULT_DATASETS)
     p.add_argument("--num-samples", type=int, default=128)
     p.add_argument("--mode", default="both", choices=["eagle", "baseline", "both"])
+    p.add_argument(
+        "--temperature",
+        type=float,
+        nargs="+",
+        required=True,
+        metavar="T",
+        help="One or more sampling temperatures; each run is executed for every dataset.",
+    )
     p.add_argument("--seed", type=int, default=42)
     p.add_argument("--num-gpus-per-model", type=int, default=1)
     p.add_argument("--num-gpus-total", type=int, default=1)
@@ -159,20 +170,23 @@ def main():
             print(f"[skip] {name}: dataset prep failed: {e}")
             if not continue_on_error:
                 raise
-            failures.append(name)
+            failures.append((name, None))
             continue
-        rc = run_one(name, args)
-        if rc != 0:
-            print(f"[fail] {name}: exit code {rc}")
-            if not continue_on_error:
-                sys.exit(rc)
-            failures.append(name)
-        else:
-            successes.append(name)
+        for temperature in args.temperature:
+            label = f"{name} (temperature={temperature})"
+            print(f"[run slice] {label}")
+            rc = run_one(name, temperature, args)
+            if rc != 0:
+                print(f"[fail] {label}: exit code {rc}")
+                if not continue_on_error:
+                    sys.exit(rc)
+                failures.append((name, temperature))
+            else:
+                successes.append((name, temperature))
 
-    print(f"[done] succeeded datasets: {successes}")
+    print(f"[done] succeeded (dataset, temperature): {successes}")
     if failures:
-        print(f"[done] failed datasets: {failures}")
+        print(f"[done] failed (dataset, temperature): {failures}")
         sys.exit(1)
     print("[done] all datasets completed")
 
