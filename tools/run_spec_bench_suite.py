@@ -51,6 +51,31 @@ DEFAULT_DATASETS = [
 ]
 
 
+def clear_gpu_memory() -> None:
+    """Best-effort GPU memory cleanup before each dataset run."""
+    cmd = ["nvidia-smi", "--gpu-reset"]
+    result = subprocess.run(cmd, cwd=str(REPO_ROOT), capture_output=True, text=True)
+    if result.returncode == 0:
+        print("[gpu] reset done")
+        return
+    # Fallback: at least trigger allocator cleanup in a short Python process.
+    fallback = (
+        "import gc\n"
+        "gc.collect()\n"
+        "try:\n"
+        "    import torch\n"
+        "    torch.cuda.empty_cache()\n"
+        "except Exception:\n"
+        "    pass\n"
+    )
+    subprocess.run([sys.executable, "-c", fallback], cwd=str(REPO_ROOT))
+    stderr = result.stderr.strip()
+    if stderr:
+        print(f"[gpu] reset skipped: {stderr}")
+    else:
+        print("[gpu] reset skipped")
+
+
 def ensure_dataset(name: str, num_samples: int) -> Path:
     qfile = DATASET_DIR / name / "question.jsonl"
     if qfile.exists():
@@ -111,28 +136,41 @@ def main():
     p.add_argument(
         "--skip-on-error",
         action="store_true",
-        help="continue running other datasets if one fails",
+        default=True,
+        help="continue running other datasets if one fails (default: on)",
+    )
+    p.add_argument(
+        "--fail-fast",
+        action="store_true",
+        help="stop immediately on first dataset failure",
     )
     args = p.parse_args()
 
     failures = []
+    successes = []
+    continue_on_error = args.skip_on_error and (not args.fail_fast)
     for raw in args.datasets:
         name = BENCH_ALIASES.get(raw, raw)
+        print(f"[start] {name}")
+        clear_gpu_memory()
         try:
             ensure_dataset(name, args.num_samples)
         except Exception as e:
             print(f"[skip] {name}: dataset prep failed: {e}")
-            if not args.skip_on_error:
+            if not continue_on_error:
                 raise
             failures.append(name)
             continue
         rc = run_one(name, args)
         if rc != 0:
             print(f"[fail] {name}: exit code {rc}")
-            if not args.skip_on_error:
+            if not continue_on_error:
                 sys.exit(rc)
             failures.append(name)
+        else:
+            successes.append(name)
 
+    print(f"[done] succeeded datasets: {successes}")
     if failures:
         print(f"[done] failed datasets: {failures}")
         sys.exit(1)

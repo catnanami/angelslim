@@ -183,8 +183,17 @@ class GenerationManager:
         model.eagle_layer.reset_kv()
 
         if hasattr(model, "past_key_values"):
-            past_key_values = model.past_key_values
-            model.current_length_data.zero_()
+            current_capacity = int(model.past_key_values_data[0].shape[3])
+            if current_capacity < int(config.max_length):
+                past_key_values, past_key_values_data, current_length_data = (
+                    initialize_past_key_values(model.base_model, max_length=config.max_length)
+                )
+                model.past_key_values = past_key_values
+                model.past_key_values_data = past_key_values_data
+                model.current_length_data = current_length_data
+            else:
+                past_key_values = model.past_key_values
+                model.current_length_data.zero_()
         else:
             past_key_values, past_key_values_data, current_length_data = (
                 initialize_past_key_values(model.base_model, max_length=config.max_length)
@@ -254,8 +263,19 @@ class CosyVoice3GenerationManager(GenerationManager):
         model.eagle_layer.reset_kv()
 
         if hasattr(model, "past_key_values"):
-            past_key_values = model.past_key_values
-            model.current_length_data.zero_()
+            current_capacity = int(model.past_key_values_data[0].shape[3])
+            if current_capacity < int(config.max_length):
+                past_key_values, past_key_values_data, current_length_data = (
+                    initialize_past_key_values(
+                        model.base_model.model.llm.llm.model, max_length=config.max_length
+                    )
+                )
+                model.past_key_values = past_key_values
+                model.past_key_values_data = past_key_values_data
+                model.current_length_data = current_length_data
+            else:
+                past_key_values = model.past_key_values
+                model.current_length_data.zero_()
         else:
             past_key_values, past_key_values_data, current_length_data = (
                 initialize_past_key_values(

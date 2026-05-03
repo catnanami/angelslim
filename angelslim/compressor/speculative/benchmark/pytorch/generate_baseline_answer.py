@@ -127,6 +127,7 @@ def process_conversation_turn(
     temperature: float,
     max_new_token: int = 512,
     preplanned_max_length: int = 0,
+    total_token: int = 60,
 ) -> Dict[str, Any]:
     """Process a single conversation turn"""
     conv.append({"role": "user", "content": qs})
@@ -139,7 +140,8 @@ def process_conversation_turn(
     ).input_ids
 
     # Mirror the eagle path: use shard-level preplanning when available.
-    dynamic_max_length = int(input_ids.shape[1]) + int(max_new_token) + 128
+    margin = max(128, int(total_token) + 5)
+    dynamic_max_length = int(input_ids.shape[1]) + int(max_new_token) + margin
     max_length = (
         max(dynamic_max_length, int(preplanned_max_length))
         if preplanned_max_length > 0
@@ -283,6 +285,7 @@ def generate_answer_for_question(
     temperature: float,
     max_new_token: int = 512,
     preplanned_max_length: int = 0,
+    total_token: int = 60,
 ) -> List[Dict[str, Any]]:
     """Generate answers for a single question with multiple choices"""
     choices = []
@@ -303,6 +306,7 @@ def generate_answer_for_question(
                 temperature,
                 max_new_token,
                 preplanned_max_length,
+                total_token,
             )
             turns.append(result["output"])
             idxs.append(result["idx"])
@@ -368,6 +372,7 @@ def warmup_model(
     temperature: float,
     max_new_token: int = 512,
     preplanned_max_length: int = 0,
+    total_token: int = 60,
 ) -> None:
     """Warm up the model before actual evaluation"""
     for _ in range(3):
@@ -382,14 +387,16 @@ def warmup_model(
                 temperature,
                 max_new_token,
                 preplanned_max_length,
+                total_token,
             )
     print("Warmup done")
 
 
 def preplan_worker_max_length(
-    tokenizer: Any, questions: List[Dict[str, Any]], max_new_token: int, margin: int = 256
+    tokenizer: Any, questions: List[Dict[str, Any]], max_new_token: int, total_token: int = 60
 ) -> int:
     """Estimate a shard-level max_length budget from prompts before generation."""
+    margin = max(128, int(total_token) + 5)
     if not questions:
         return int(max_new_token) + margin
 
@@ -440,7 +447,9 @@ def get_model_answers(
     config = EvaluationConfig(args)
     model = initialize_model(config)
     tokenizer = model.get_tokenizer()
-    preplanned_max_length = preplan_worker_max_length(tokenizer, questions, args.max_new_token)
+    preplanned_max_length = preplan_worker_max_length(
+        tokenizer, questions, args.max_new_token, args.total_token
+    )
     print(f"Preplanned worker max_length: {preplanned_max_length}")
 
     if questions:
@@ -451,6 +460,7 @@ def get_model_answers(
             temperature,
             args.max_new_token,
             preplanned_max_length,
+            args.total_token,
         )
 
     os.makedirs(os.path.dirname(answer_file), exist_ok=True)
@@ -464,6 +474,7 @@ def get_model_answers(
             temperature,
             args.max_new_token,
             preplanned_max_length,
+            args.total_token,
         )
 
         with open(os.path.expanduser(answer_file), "a") as fout:
