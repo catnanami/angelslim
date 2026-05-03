@@ -53,6 +53,23 @@ DEFAULT_DATASETS = [
 ]
 
 
+def detect_gpu_count() -> int:
+    """Best-effort GPU count detection via nvidia-smi."""
+    try:
+        result = subprocess.run(
+            ["nvidia-smi", "-L"],
+            cwd=str(REPO_ROOT),
+            capture_output=True,
+            text=True,
+        )
+        if result.returncode != 0:
+            return 1
+        lines = [line for line in result.stdout.splitlines() if line.strip()]
+        return max(1, len(lines))
+    except Exception:
+        return 1
+
+
 def clear_gpu_memory() -> None:
     """Best-effort GPU memory cleanup before each dataset run."""
     cmd = ["nvidia-smi", "--gpu-reset"]
@@ -143,7 +160,12 @@ def main():
     )
     p.add_argument("--seed", type=int, default=42)
     p.add_argument("--num-gpus-per-model", type=int, default=1)
-    p.add_argument("--num-gpus-total", type=int, default=1)
+    p.add_argument(
+        "--num-gpus-total",
+        type=int,
+        default=None,
+        help="Total GPUs. Default: auto-detect from nvidia-smi -L.",
+    )
     p.add_argument(
         "--skip-on-error",
         action="store_true",
@@ -156,6 +178,23 @@ def main():
         help="stop immediately on first dataset failure",
     )
     args = p.parse_args()
+    if args.num_gpus_total is None:
+        args.num_gpus_total = detect_gpu_count()
+    if args.num_gpus_per_model > args.num_gpus_total:
+        raise ValueError(
+            f"num-gpus-per-model ({args.num_gpus_per_model}) cannot exceed "
+            f"num-gpus-total ({args.num_gpus_total})"
+        )
+    if args.num_gpus_total > args.num_gpus_per_model:
+        print(
+            f"[warn] num_gpus_total ({args.num_gpus_total}) > "
+            f"num_gpus_per_model ({args.num_gpus_per_model})"
+        )
+        print(
+            f"[warn] This starts multiple workers, each worker sees only "
+            f"{args.num_gpus_per_model} GPU(s)."
+        )
+        print("[warn] Large models may offload weights to CPU under this setting.")
 
     failures = []
     successes = []
