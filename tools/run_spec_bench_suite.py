@@ -114,8 +114,7 @@ def ensure_dataset(name: str, num_samples: int) -> Path:
 
 
 def run_one(name: str, temperature: float, args: argparse.Namespace) -> int:
-    temp_tag = str(temperature).replace(".", "p")
-    out_dir = Path(args.output_root) / name / f"t_{temp_tag}"
+    out_dir = Path(args.output_root) / name
     out_dir.mkdir(parents=True, exist_ok=True)
     cmd = [
         sys.executable,
