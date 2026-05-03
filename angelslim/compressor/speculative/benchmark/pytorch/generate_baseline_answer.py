@@ -98,6 +98,12 @@ def initialize_model(config: EvaluationConfig) -> Eagle3Model:
     model.eval()
     print(f"Model training state: {model.training}")
     print(f'CUDA VISIBLE DEVICES: {os.environ.get("CUDA_VISIBLE_DEVICES")}')
+    hf_device_map = getattr(model.base_model, "hf_device_map", None)
+    if hf_device_map is not None:
+        cpu_shards = sum(1 for v in hf_device_map.values() if str(v) == "cpu")
+        print(f"hf_device_map entries: {len(hf_device_map)}, cpu_shards: {cpu_shards}")
+        if cpu_shards > 0:
+            print("[warn] Some model shards are placed on CPU")
     return model
 
 
@@ -116,6 +122,12 @@ def initialize_cosycoice3_model(config: EvaluationConfig) -> CosyVoice3Eagle3Mod
     model.eval()
     print(f"Model training state: {model.training}")
     print(f'CUDA VISIBLE DEVICES: {os.environ.get("CUDA_VISIBLE_DEVICES")}')
+    hf_device_map = getattr(model.base_model, "hf_device_map", None)
+    if hf_device_map is not None:
+        cpu_shards = sum(1 for v in hf_device_map.values() if str(v) == "cpu")
+        print(f"hf_device_map entries: {len(hf_device_map)}, cpu_shards: {cpu_shards}")
+        if cpu_shards > 0:
+            print("[warn] Some model shards are placed on CPU")
     return model
 
 
