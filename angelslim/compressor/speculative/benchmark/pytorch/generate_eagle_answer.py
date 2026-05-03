@@ -129,6 +129,7 @@ def process_conversation_turn(
     qs: str,
     temperature: float,
     max_new_token: int = 512,
+    preplanned_max_length: int = 0,
 ) -> Dict[str, Any]:
     """Process a single conversation turn"""
     conv.append({"role": "user", "content": qs})
@@ -140,11 +141,15 @@ def process_conversation_turn(
         conversation, return_tensors="pt", add_special_tokens=False
     ).input_ids
 
-    # KV cache in eagle_generate is pre-allocated to `max_length`; 2048 is the
-    # upstream default and is too small for long prompts (LiveCodeBench runs
-    # ~2k tokens). Size it to fit the prompt plus the full generation budget,
-    # with margin for the draft tree (default total_tokens=60) and eos guards.
-    max_length = int(input_ids.shape[1]) + int(max_new_token) + 128
+    # KV cache in eagle_generate is pre-allocated to `max_length`.
+    # If a worker-level budget is preplanned, prefer it for stable reuse across
+    # the whole worker shard; otherwise fall back to per-request sizing.
+    dynamic_max_length = int(input_ids.shape[1]) + int(max_new_token) + 128
+    max_length = (
+        max(dynamic_max_length, int(preplanned_max_length))
+        if preplanned_max_length > 0
+        else dynamic_max_length
+    )
 
     torch.cuda.synchronize()
     start_time = time.time()
@@ -279,6 +284,7 @@ def generate_answer_for_question(
     num_choices: int,
     temperature: float,
     max_new_token: int = 512,
+    preplanned_max_length: int = 0,
 ) -> List[Dict[str, Any]]:
     """Generate answers for a single question with multiple choices"""
     choices = []
@@ -293,7 +299,13 @@ def generate_answer_for_question(
 
         for qs in question["turns"]:
             result = process_conversation_turn(
-                model, tokenizer, conv, qs, temperature, max_new_token
+                model,
+                tokenizer,
+                conv,
+                qs,
+                temperature,
+                max_new_token,
+                preplanned_max_length,
             )
             turns.append(result["output"])
             idxs.append(result["idx"])
@@ -361,6 +373,7 @@ def warmup_model(
     question: Dict[str, Any],
     temperature: float,
     max_new_token: int = 512,
+    preplanned_max_length: int = 0,
 ) -> None:
     """Warm up the model before actual evaluation"""
     for _ in range(3):
@@ -368,9 +381,42 @@ def warmup_model(
         conv = [SYSTEM_PROMPT]
         for qs in question["turns"]:
             process_conversation_turn(
-                model, tokenizer, conv, qs, temperature, max_new_token
+                model,
+                tokenizer,
+                conv,
+                qs,
+                temperature,
+                max_new_token,
+                preplanned_max_length,
             )
     print("Warmup done")
+
+
+def preplan_worker_max_length(
+    tokenizer: Any, questions: List[Dict[str, Any]], max_new_token: int, margin: int = 256
+) -> int:
+    """Estimate a shard-level max_length budget from prompts before generation."""
+    if not questions:
+        return int(max_new_token) + margin
+
+    max_prompt_tokens = 0
+    for question in questions:
+        conv = [SYSTEM_PROMPT]
+        for qs in question["turns"]:
+            conv.append({"role": "user", "content": qs})
+            conversation = tokenizer.apply_chat_template(
+                conv, tokenize=False, add_generation_prompt=False, enable_thinking=False
+            )
+            prompt_len = int(
+                tokenizer(
+                    conversation, return_tensors="pt", add_special_tokens=False
+                ).input_ids.shape[1]
+            )
+            max_prompt_tokens = max(max_prompt_tokens, prompt_len)
+            # Keep structure equivalent to multi-turn flow.
+            conv.append({"role": "assistant", "content": ""})
+
+    return max_prompt_tokens + int(max_new_token) + margin
 
 
 def warmup_tts_lm(
@@ -401,15 +447,30 @@ def get_model_answers(
     config = EvaluationConfig(args)
     model = initialize_model(config)
     tokenizer = model.get_tokenizer()
+    preplanned_max_length = preplan_worker_max_length(tokenizer, questions, args.max_new_token)
+    print(f"Preplanned worker max_length: {preplanned_max_length}")
 
     if questions:
-        warmup_model(model, tokenizer, questions[0], temperature, args.max_new_token)
+        warmup_model(
+            model,
+            tokenizer,
+            questions[0],
+            temperature,
+            args.max_new_token,
+            preplanned_max_length,
+        )
 
     os.makedirs(os.path.dirname(answer_file), exist_ok=True)
 
     for question in tqdm(questions):
         choices = generate_answer_for_question(
-            model, tokenizer, question, num_choices, temperature, args.max_new_token
+            model,
+            tokenizer,
+            question,
+            num_choices,
+            temperature,
+            args.max_new_token,
+            preplanned_max_length,
         )
 
         with open(os.path.expanduser(answer_file), "a") as fout:
