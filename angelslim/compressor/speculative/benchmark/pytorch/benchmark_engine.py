@@ -234,10 +234,16 @@ class BenchmarkEngine:
         if os.path.exists(self.eagle_file):
             metrics["acceptance_length"] = self._calculate_acceptance_length(self.eagle_file)
             metrics["eagle_avg_wall_time_ms"] = self._calculate_avg_wall_time_ms(self.eagle_file)
+            metrics["eagle_avg_ms_per_token"] = self._calculate_avg_ms_per_token(
+                self.eagle_file, self.config.base_model_path, is_eagle=True
+            )
 
         if os.path.exists(self.baseline_file):
             metrics["baseline_avg_wall_time_ms"] = self._calculate_avg_wall_time_ms(
                 self.baseline_file
+            )
+            metrics["baseline_avg_ms_per_token"] = self._calculate_avg_ms_per_token(
+                self.baseline_file, self.config.base_model_path, is_eagle=False
             )
 
         # Calculate speedup ratio if both files exist
@@ -262,6 +268,33 @@ class BenchmarkEngine:
                 total += float(sum(data["choices"][0]["wall_time"]))
                 count += 1
         return (total / count) * 1000.0 if count > 0 else 0.0
+
+    def _calculate_avg_ms_per_token(
+        self, input_file: str, model_path: str, is_eagle: bool
+    ) -> float:
+        """
+        Calculate average milliseconds per generated token.
+
+        Metric formula:
+            avg_ms_per_token = (sum(sample_wall_time) / sum(sample_tokens)) * 1000
+        """
+        tokenizer = None if is_eagle else AutoTokenizer.from_pretrained(model_path)
+        total_time = 0.0
+        total_tokens = 0.0
+
+        with open(input_file, "r", encoding="utf-8") as f:
+            for line in f:
+                data = json.loads(line)
+                total_time += float(sum(data["choices"][0]["wall_time"]))
+                if is_eagle:
+                    total_tokens += float(sum(data["choices"][0]["new_tokens"]))
+                else:
+                    answers = data["choices"][0]["turns"]
+                    total_tokens += float(sum(len(tokenizer(ans).input_ids) - 1 for ans in answers))
+
+        if total_tokens <= 0:
+            return 0.0
+        return (total_time / total_tokens) * 1000.0
 
     def _calculate_acceptance_length(self, input_file: str) -> float:
         """
@@ -412,6 +445,14 @@ class BenchmarkEngine:
         if "baseline_avg_wall_time_ms" in self.results:
             summary.append(
                 f"Baseline Avg Wall Time: {self.results['baseline_avg_wall_time_ms']:.2f} ms"
+            )
+        if "eagle_avg_ms_per_token" in self.results:
+            summary.append(
+                f"Eagle Avg Latency: {self.results['eagle_avg_ms_per_token']:.4f} ms/token"
+            )
+        if "baseline_avg_ms_per_token" in self.results:
+            summary.append(
+                f"Baseline Avg Latency: {self.results['baseline_avg_ms_per_token']:.4f} ms/token"
             )
 
         if "eagle_file" in self.results:
