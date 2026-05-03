@@ -11,7 +11,7 @@
 #   mode=both
 #   output_dir=benchmark_results/livecodebench
 #   num_gpus_total=<detected by nvidia-smi, fallback 1>
-#   num_gpus_per_model=num_gpus_total  (single model spans all visible GPUs)
+#   num_gpus_per_model=1
 #
 # This script:
 #   1. Ensures dataset/livecodebench/question.jsonl exists (runs the preparer
@@ -46,7 +46,7 @@ detect_gpu_count() {
 
 DEFAULT_NUM_GPUS_TOTAL=$(detect_gpu_count)
 NUM_GPUS_TOTAL=${7:-${NUM_GPUS_TOTAL:-${DEFAULT_NUM_GPUS_TOTAL}}}
-NUM_GPUS_PER_MODEL=${8:-${NUM_GPUS_PER_MODEL:-${NUM_GPUS_TOTAL}}}
+NUM_GPUS_PER_MODEL=${8:-${NUM_GPUS_PER_MODEL:-1}}
 
 if [[ "${NUM_GPUS_PER_MODEL}" -gt "${NUM_GPUS_TOTAL}" ]]; then
     echo "[error] num_gpus_per_model (${NUM_GPUS_PER_MODEL}) cannot exceed num_gpus_total (${NUM_GPUS_TOTAL})" >&2
