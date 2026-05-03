@@ -178,7 +178,9 @@ class GptOssModel(HFGptOssModel):
             return [int(x) for x in self.eagle_aux_hidden_state_layer_ids]
 
         num_layers = len(self.layers)
-        return [2, num_layers // 2, max(0, num_layers - 3)]
+        # Keep parity with training-time default (layer ids without embedding
+        # offset): [1, mid-1, last-4]. In inference we map with +1.
+        return [1, max(0, num_layers // 2 - 1), max(0, num_layers - 4)]
 
     def forward(
         self,
@@ -189,6 +191,7 @@ class GptOssModel(HFGptOssModel):
         inputs_embeds: Optional[torch.FloatTensor] = None,
         use_cache: Optional[bool] = None,
         cache_position: Optional[torch.LongTensor] = None,
+        output_hidden_states: Optional[bool] = None,
         **kwargs: Unpack[TransformersKwargs],
     ) -> MoeModelOutputWithPast:
         if (input_ids is None) ^ (inputs_embeds is not None):
@@ -244,12 +247,18 @@ class GptOssModel(HFGptOssModel):
 
         hidden_states = inputs_embeds
         position_embeddings = self.rotary_emb(hidden_states, position_ids)
+        output_hidden_states = (
+            output_hidden_states
+            if output_hidden_states is not None
+            else self.config.output_hidden_states
+        )
 
         aux_ids = self._resolve_aux_layer_ids()
-        aux_ids = [
-            layer_id for layer_id in aux_ids if layer_id >= 0 and layer_id < len(self.layers)
+        aux_decoder_ids = [layer_id + 1 for layer_id in aux_ids]
+        aux_decoder_ids = [
+            layer_id for layer_id in aux_decoder_ids if layer_id >= 0 and layer_id < len(self.layers)
         ]
-        aux_id_set = set(aux_ids)
+        aux_id_set = set(aux_decoder_ids)
 
         all_hidden_states = ()
         for layer_idx, decoder_layer in enumerate(self.layers):
@@ -268,7 +277,8 @@ class GptOssModel(HFGptOssModel):
             )
 
         hidden_states = self.norm(hidden_states)
-        all_hidden_states += (hidden_states,)
+        if output_hidden_states:
+            all_hidden_states += (hidden_states,)
 
         return MoeModelOutputWithPast(
             last_hidden_state=hidden_states,
@@ -296,6 +306,7 @@ class GptOssForCausalLM(HFGptOssForCausalLM):
         labels: Optional[torch.LongTensor] = None,
         use_cache: Optional[bool] = None,
         output_router_logits: Optional[bool] = None,
+        output_hidden_states: Optional[bool] = None,
         cache_position: Optional[torch.LongTensor] = None,
         logits_to_keep: Union[int, torch.Tensor] = 0,
         **kwargs: Unpack[TransformersKwargs],
@@ -314,6 +325,7 @@ class GptOssForCausalLM(HFGptOssForCausalLM):
             inputs_embeds=inputs_embeds,
             use_cache=use_cache,
             output_router_logits=output_router_logits,
+            output_hidden_states=output_hidden_states,
             cache_position=cache_position,
             **kwargs,
         )
