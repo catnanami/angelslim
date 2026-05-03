@@ -61,6 +61,7 @@ class EvaluationConfig:
         self.top_k = args.top_k
         self.early_stop_method = args.early_stop_method
         self.generate_audio = args.generate_audio
+        self.num_gpus_per_model = args.num_gpus_per_model
 
     def _get_question_file_path(self, args: argparse.Namespace) -> str:
         script_dir = os.path.dirname(__file__)
@@ -85,6 +86,44 @@ def setup_seed(seed: int) -> None:
     torch.backends.cudnn.deterministic = True
 
 
+def _resolve_device_map(config: EvaluationConfig):
+    """Use a single fixed GPU map when one GPU is requested per model."""
+    return 0 if int(config.num_gpus_per_model) == 1 else "auto"
+
+
+def _pin_single_gpu_for_ray_worker(config: EvaluationConfig) -> None:
+    """Pin CUDA visibility per Ray worker to avoid accidental multi-GPU sharding."""
+    if int(config.num_gpus_per_model) != 1:
+        return
+    try:
+        if not ray.is_initialized():
+            return
+    except Exception:
+        return
+    try:
+        gpu_ids = ray.get_gpu_ids()
+    except Exception as exc:
+        print(f"[warn] Failed to query Ray GPU ids: {exc}")
+        return
+    if not gpu_ids:
+        print("[warn] Ray returned empty GPU ids; skip CUDA pinning")
+        return
+    raw_gpu_id = gpu_ids[0]
+    try:
+        gpu_id = int(raw_gpu_id)
+    except (TypeError, ValueError):
+        gpu_id = int(float(raw_gpu_id))
+
+    prev = os.environ.get("CUDA_VISIBLE_DEVICES")
+    os.environ["CUDA_VISIBLE_DEVICES"] = str(gpu_id)
+    if torch.cuda.is_available():
+        torch.cuda.set_device(0)
+    print(
+        f"Ray GPU binding: ray.get_gpu_ids()={gpu_ids}, "
+        f"CUDA_VISIBLE_DEVICES: {prev} -> {os.environ.get('CUDA_VISIBLE_DEVICES')}"
+    )
+
+
 def initialize_model(config: EvaluationConfig) -> Eagle3Model:
     """Initialize and return the Eagle3 model"""
     model = Eagle3Model.from_pretrained(
@@ -93,7 +132,7 @@ def initialize_model(config: EvaluationConfig) -> Eagle3Model:
         total_token=config.total_token,
         depth=config.depth,
         top_k=config.top_k,
-        device_map="auto",
+        device_map=_resolve_device_map(config),
         torch_dtype="auto",
         early_stop_method=config.early_stop_method,
     )
@@ -117,7 +156,7 @@ def initialize_cosycoice3_model(config: EvaluationConfig) -> CosyVoice3Eagle3Mod
         total_token=config.total_token,
         depth=config.depth,
         top_k=config.top_k,
-        device_map="auto",
+        device_map=_resolve_device_map(config),
         torch_dtype="auto",
         early_stop_method=config.early_stop_method,
         generate_audio=config.generate_audio,
@@ -464,6 +503,7 @@ def get_model_answers(
 ) -> None:
     """Generate answers for a batch of questions"""
     config = EvaluationConfig(args)
+    _pin_single_gpu_for_ray_worker(config)
     model = initialize_model(config)
     tokenizer = model.get_tokenizer()
     preplanned_max_length = preplan_worker_max_length(
@@ -518,6 +558,7 @@ def get_tts_answers(
 ) -> None:
     """Generate answers for a batch of questions"""
     config = EvaluationConfig(args)
+    _pin_single_gpu_for_ray_worker(config)
     is_cosyvoice3 = False
     if os.path.exists(os.path.join(args.base_model_path, "cosyvoice3.yaml")):
         model = initialize_cosycoice3_model(config)
@@ -569,6 +610,7 @@ def get_tts_audios(
 ) -> None:
     """Generate audios for a batch of audio tokens"""
     config = EvaluationConfig(args)
+    _pin_single_gpu_for_ray_worker(config)
     if os.path.exists(os.path.join(args.base_model_path, "cosyvoice3.yaml")):
         model = initialize_cosycoice3_model(config)
 
